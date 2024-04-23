@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsValue;
 // Structure to represent form data parts
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FormData {
@@ -9,19 +10,19 @@ pub struct FormData {
 }
 
 #[wasm_bindgen]
-pub fn parse(array_buffer: Vec<u8>, boundry: String) {
+pub fn parse(array_buffer: Vec<u8>, boundry: String) -> JsValue {
   let buffer = Bytes::from(array_buffer);
 
   // Placeholder for storing parsed form data
   let mut parts: Vec<FormData> = Vec::new();
   // Split the buffer by the boundary
-  let segments = split_by_boundary(&buffer, &boundry)?;
+  let segments = split_by_boundary(&buffer, &boundry).unwrap();
   // Parse each segment into FormData
   for segment in segments {
-    let form_data = parse_segment(segment)?;
+    let form_data = parse_segment(segment).unwrap();
     parts.push(form_data);
   }
-  Ok(parts)
+  serde_wasm_bindgen::to_value(&parts).unwrap()
 }
 
 pub fn split_by_boundary(
@@ -33,7 +34,7 @@ pub fn split_by_boundary(
   let mut end = 0;
   let mut i = 0;
   while i < buffer.len() {
-    if buffer[i] == boundry[0] as u8 {
+    if buffer[i] == boundry.chars().nth(0).unwrap() as u8 {
       if i + boundry.len() < buffer.len() {
         if &buffer[i..i + boundry.len()] == boundry.as_bytes() {
           if start != 0 {
