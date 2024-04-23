@@ -9,6 +9,7 @@ pub struct FormData {
   body: Vec<u8>,
 }
 
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn parse(array_buffer: Vec<u8>, boundry: String) -> JsValue {
   let buffer = Bytes::from(array_buffer);
@@ -23,6 +24,21 @@ pub fn parse(array_buffer: Vec<u8>, boundry: String) -> JsValue {
     parts.push(form_data);
   }
   serde_wasm_bindgen::to_value(&parts).unwrap()
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub fn parse(array_buffer: Vec<u8>, boundry: String) -> Vec<FormData> {
+  let buffer = Bytes::from(array_buffer);
+
+  // Placeholder for storing parsed form data
+  let mut parts: Vec<FormData> = Vec::new();
+  // Split the buffer by the boundary
+  let segments = split_by_boundary(&buffer, &boundry).unwrap();
+  // Parse each segment into FormData
+  for segment in segments {
+    let form_data = parse_segment(segment).unwrap();
+    parts.push(form_data);
+  }
+  return parts;
 }
 
 pub fn split_by_boundary(
@@ -50,11 +66,20 @@ pub fn split_by_boundary(
     end += 1;
     i += 1;
   }
-  segments.push(buffer.slice(start..end));
+  // Check if the last segment is the end boundary
+  if segments
+    .last()
+    .map(|s| s == boundry.as_bytes())
+    .unwrap_or(false)
+  {
+    segments.pop();
+  }
   Ok(segments)
 }
 
 pub fn parse_segment(segment: Bytes) -> Result<FormData, String> {
+  println!("{:?}", segment);
+
   let mut headers: Vec<(String, String)> = Vec::new();
   let mut body: Vec<u8> = Vec::new();
   let mut i = 0;
@@ -102,7 +127,7 @@ mod tests {
   #[test]
   fn parse_multiple_entries() {
     // Define the multipart/form-data content
-    let multipart_data = r#"------WebKitFormBoundary7MA4YWxkTrZu0gW
+    let multipart_data = r#"------WebKitFormBoundary7MA4YWxkTrZu0gW\r\n
        Content-Disposition: form-data; name="username"
        
        john_doe
@@ -112,12 +137,34 @@ mod tests {
        
        Hello, world!
        ------WebKitFormBoundary7MA4YWxkTrZu0gW--"#;
+    let body = r#"trash1\r\n
+       ------WebKitFormBoundaryvef1fLxmoUdYZWXp\r\n
+       Content-Type: text/plain\r\n
+       Content-Disposition: form-data; name="uploads[]"; filename="A.txt"\r\n
+       \r\n
+       @11X111Y\r\n
+       111Z\rCCCC\nCCCC\r\nCCCCC@\r\n\r\n
+       ------WebKitFormBoundaryvef1fLxmoUdYZWXp\r\n
+       Content-Type: text/plain\r\n
+       Content-Disposition: form-data; name="uploads[]"; filename="B.txt"\r\n
+       \r\n
+       @22X222Y\r\n
+       222Z\r222W\n2220\r\n666@\r\n
+       ------WebKitFormBoundaryvef1fLxmoUdYZWXp\r\n
+       Content-Disposition: form-data; name="input1"\r\n
+       \r\n
+       value1\r\n
+       ------WebKitFormBoundaryvef1fLxmoUdYZWXp--\r\n"#;
 
     // Convert the string to a vector of bytes
-    let buffer: Vec<u8> = multipart_data.as_bytes().to_vec();
+    let buffer: Vec<u8> = body.as_bytes().to_vec();
 
-    let boundry: String = String::from("----WebKitFormBoundary7MA4YWxkTrZu0gW");
+    let boundry: String =
+      String::from("----WebKitFormBoundaryvef1fLxmoUdYZWXp");
     let result = parse(buffer, boundry);
-    assert_eq!(result, 3);
+    // Check if the result is as expected
+    println!("{:?}", result);
+    assert_eq!(result.len(), 3);
+    // assert_eq!(result[0], );
   }
 }

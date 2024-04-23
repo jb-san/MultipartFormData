@@ -13,7 +13,8 @@ lto = true
 opt-level = "z"
 
 [dependencies]
-wasm-bindgen = "=0.2.81"
+wasm-bindgen = "=0.2.92"
 bytes = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.4"
+wasm-bindgen-test = "0.3.42"
