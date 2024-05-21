@@ -24,7 +24,7 @@ formData.append("file", new Blob(["hello world"]), {
 import MultipartFormData from "multipart-form-data";
 const data = await response.body.arrayBuffer();
 const contentType = response.headers.get("Content-Type");
-const formData = new MultipartFormData(data, contentType);
+const formData = await MultipartFormData.parse(data, contentType);
 for (const [name, value, metadata] of formData) {
   console.log(name, value, metadata);
 }

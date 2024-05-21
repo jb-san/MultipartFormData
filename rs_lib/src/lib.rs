@@ -1,7 +1,11 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsValue;
+// use std::env;
+use std::fs::File;
+use std::io::Read;
+// use std::path::Path;
+// use wasm_bindgen::prelude::*;
+// use wasm_bindgen::JsValue;
 // Structure to represent form data parts
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FormData {
@@ -78,8 +82,6 @@ pub fn split_by_boundary(
 }
 
 pub fn parse_segment(segment: Bytes) -> Result<FormData, String> {
-  println!("{:?}", segment);
-
   let mut headers: Vec<(String, String)> = Vec::new();
   let mut body: Vec<u8> = Vec::new();
   let mut i = 0;
@@ -88,35 +90,44 @@ pub fn parse_segment(segment: Bytes) -> Result<FormData, String> {
   let mut header = true;
   while i < segment.len() {
     if header {
-      if segment[i] == b'\r' && segment[i + 1] == b'\n' {
-        if start == 0 {
-          break;
-        }
+      //
+
+      // Check if the header is complete
+      if segment[i] == (b'\r' as u8)
+        && segment[i + 1] == (b'\n' as u8)
+        && end > start
+      {
         let header_str = String::from_utf8(segment.slice(start..end).to_vec())
           .map_err(|_| "Failed to parse header")?;
+
         let parts: Vec<&str> = header_str.split(": ").collect();
-        if parts.len() != 2 {
-          return Err("Invalid header".to_string());
+        if parts.len() == 2 {
+          // return Err("Invalid header".to_string());
+          headers.push((parts[0].to_string(), parts[1].to_string()));
+        } else {
+          header = false
         }
-        headers.push((parts[0].to_string(), parts[1].to_string()));
-        i += 2;
-        start = i;
-        end = i;
-        header = false;
       }
-    } else {
-      if segment[i] == b'\r'
-        && segment[i + 1] == b'\n'
-        && segment[i + 2] == b'\r'
-        && segment[i + 3] == b'\n'
-      {
-        body = segment.slice(i + 4..segment.len()).to_vec();
-        break;
-      }
+    }
+    if segment[i] == b'\r' as u8
+      && segment[i + 1] == b'\n' as u8
+      && segment[i + 2] == b'\r' as u8
+      && segment[i + 3] == b'\n' as u8
+    {
+      body = segment.slice(i + 4..segment.len()).to_vec();
+      break;
+    }
+
+    // set the start of the header
+    if segment[i] == (b'\r' as u8) && segment[i + 1] == (b'\n' as u8) {
+      start = i + 2;
     }
     end += 1;
     i += 1;
   }
+  // println!("headers {:?}", headers);
+  // println!("body {:?}", body);
+
   Ok(FormData { headers, body })
 }
 
@@ -124,47 +135,29 @@ pub fn parse_segment(segment: Bytes) -> Result<FormData, String> {
 mod tests {
   use super::*;
 
+  fn read_file(path: &str) -> Result<Vec<u8>, std::io::Error> {
+    // let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("moc");
+    // env::set_current_dir(&test_dir).expect("Failed to set current directory");
+
+    let mut file = File::open(path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    Ok(buffer)
+  }
   #[test]
   fn parse_multiple_entries() {
     // Define the multipart/form-data content
-    let multipart_data = r#"------WebKitFormBoundary7MA4YWxkTrZu0gW\r\n
-       Content-Disposition: form-data; name="username"
-       
-       john_doe
-       ------WebKitFormBoundary7MA4YWxkTrZu0gW
-       Content-Disposition: form-data; name="file"; filename="example.txt"
-       Content-Type: text/plain
-       
-       Hello, world!
-       ------WebKitFormBoundary7MA4YWxkTrZu0gW--"#;
-    let body = r#"trash1\r\n
-       ------WebKitFormBoundaryvef1fLxmoUdYZWXp\r\n
-       Content-Type: text/plain\r\n
-       Content-Disposition: form-data; name="uploads[]"; filename="A.txt"\r\n
-       \r\n
-       @11X111Y\r\n
-       111Z\rCCCC\nCCCC\r\nCCCCC@\r\n\r\n
-       ------WebKitFormBoundaryvef1fLxmoUdYZWXp\r\n
-       Content-Type: text/plain\r\n
-       Content-Disposition: form-data; name="uploads[]"; filename="B.txt"\r\n
-       \r\n
-       @22X222Y\r\n
-       222Z\r222W\n2220\r\n666@\r\n
-       ------WebKitFormBoundaryvef1fLxmoUdYZWXp\r\n
-       Content-Disposition: form-data; name="input1"\r\n
-       \r\n
-       value1\r\n
-       ------WebKitFormBoundaryvef1fLxmoUdYZWXp--\r\n"#;
 
-    // Convert the string to a vector of bytes
-    let buffer: Vec<u8> = body.as_bytes().to_vec();
+    let file_path = "./mocks/c006a72d54394df978b69f41250ae264904000dd4fc39631e10080c96cd7.response";
+    let file_data = read_file(file_path).unwrap();
 
-    let boundry: String =
-      String::from("----WebKitFormBoundaryvef1fLxmoUdYZWXp");
-    let result = parse(buffer, boundry);
+    let boundry: String = String::from(
+      "c006a72d54394df978b69f41250ae264904000dd4fc39631e10080c96cd7",
+    );
+    let result = parse(file_data, boundry);
     // Check if the result is as expected
-    println!("{:?}", result);
-    assert_eq!(result.len(), 3);
+    // println!("{:?}", result[0]);
+    assert_eq!(result.len(), 10);
     // assert_eq!(result[0], );
   }
 }
