@@ -1,140 +1,107 @@
-use bytes::Bytes;
-use serde::{Deserialize, Serialize};
-// use std::env;
-use std::fs::File;
-use std::io::Read;
-// use std::path::Path;
-// use wasm_bindgen::prelude::*;
-// use wasm_bindgen::JsValue;
-// Structure to represent form data parts
-#[derive(Serialize, Deserialize, Debug, Clone)]
+use nom::{
+  branch::alt,
+  bytes::complete::{tag, take_until},
+  combinator::{map, not, opt},
+  multi::{many0, many_till},
+  sequence::{delimited, preceded, terminated},
+  IResult,
+};
+
+#[derive(Debug)]
 pub struct FormData {
-  headers: Vec<(String, String)>,
+  segments: Vec<Segment>,
+}
+
+#[derive(Debug)]
+struct Segment {
+  headers: Vec<Header>,
   body: Vec<u8>,
 }
 
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn parse(array_buffer: Vec<u8>, boundry: String) -> JsValue {
-  let buffer = Bytes::from(array_buffer);
-
-  // Placeholder for storing parsed form data
-  let mut parts: Vec<FormData> = Vec::new();
-  // Split the buffer by the boundary
-  let segments = split_by_boundary(&buffer, &boundry).unwrap();
-  // Parse each segment into FormData
-  for segment in segments {
-    let form_data = parse_segment(segment).unwrap();
-    parts.push(form_data);
-  }
-  serde_wasm_bindgen::to_value(&parts).unwrap()
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub fn parse(array_buffer: Vec<u8>, boundry: String) -> Vec<FormData> {
-  let buffer = Bytes::from(array_buffer);
-
-  // Placeholder for storing parsed form data
-  let mut parts: Vec<FormData> = Vec::new();
-  // Split the buffer by the boundary
-  let segments = split_by_boundary(&buffer, &boundry).unwrap();
-  // Parse each segment into FormData
-  for segment in segments {
-    let form_data = parse_segment(segment).unwrap();
-    parts.push(form_data);
-  }
-  return parts;
+#[derive(Debug)]
+struct Header {
+  name: String,
+  value: String,
 }
 
-pub fn split_by_boundary(
-  buffer: &Bytes,
-  boundry: &str,
-) -> Result<Vec<Bytes>, String> {
-  let mut segments: Vec<Bytes> = Vec::new();
-  let mut start = 0;
-  let mut end = 0;
-  let mut i = 0;
-  while i < buffer.len() {
-    if buffer[i] == boundry.chars().nth(0).unwrap() as u8 {
-      if i + boundry.len() < buffer.len() {
-        if &buffer[i..i + boundry.len()] == boundry.as_bytes() {
-          if start != 0 {
-            segments.push(buffer.slice(start..end));
-          }
-          start = i + boundry.len();
-          end = start;
-          i += boundry.len();
-          continue;
-        }
-      }
-    }
-    end += 1;
-    i += 1;
-  }
-  // Check if the last segment is the end boundary
-  if segments
-    .last()
-    .map(|s| s == boundry.as_bytes())
-    .unwrap_or(false)
-  {
-    segments.pop();
-  }
-  Ok(segments)
+pub fn parse_multipart<'a>(
+  input: &'a [u8],
+  boundary: &'a str,
+) -> IResult<&'a [u8], FormData> {
+  let (input, segments) =
+    many0(preceded(parse_boundary(&boundary), parse_segment(boundary)))(input)?;
+
+  Ok((input, FormData { segments }))
 }
 
-pub fn parse_segment(segment: Bytes) -> Result<FormData, String> {
-  let mut headers: Vec<(String, String)> = Vec::new();
-  let mut body: Vec<u8> = Vec::new();
-  let mut i = 0;
-  let mut start = 0;
-  let mut end = 0;
-  let mut header = true;
-  while i < segment.len() {
-    if header {
-      //
+fn parse_boundary<'a>(
+  boundary: &'a str,
+) -> impl FnMut(&'a [u8]) -> IResult<&'a [u8], &'a [u8]> {
+  let moved = boundary;
 
-      // Check if the header is complete
-      if segment[i] == (b'\r' as u8)
-        && segment[i + 1] == (b'\n' as u8)
-        && end > start
-      {
-        let header_str = String::from_utf8(segment.slice(start..end).to_vec())
-          .map_err(|_| "Failed to parse header")?;
-
-        let parts: Vec<&str> = header_str.split(": ").collect();
-        if parts.len() == 2 {
-          // return Err("Invalid header".to_string());
-          headers.push((parts[0].to_string(), parts[1].to_string()));
-        } else {
-          header = false
-        }
-      }
-    }
-    if segment[i] == b'\r' as u8
-      && segment[i + 1] == b'\n' as u8
-      && segment[i + 2] == b'\r' as u8
-      && segment[i + 3] == b'\n' as u8
-    {
-      body = segment.slice(i + 4..segment.len()).to_vec();
-      break;
-    }
-
-    // set the start of the header
-    if segment[i] == (b'\r' as u8) && segment[i + 1] == (b'\n' as u8) {
-      start = i + 2;
-    }
-    end += 1;
-    i += 1;
+  move |input| {
+    let res = alt((
+      delimited(tag("\r\n--"), tag(moved), tag("\r\n")),
+      delimited(tag("--"), tag(moved), tag("\r\n")),
+    ))(input);
+    res
   }
-  // println!("headers {:?}", headers);
-  // println!("body {:?}", body);
-
-  Ok(FormData { headers, body })
 }
+
+fn parse_segment<'a>(
+  boundary: &str,
+) -> impl FnMut(&'a [u8]) -> IResult<&'a [u8], Segment> + '_ {
+  let moved = boundary;
+  move |input| {
+    let (input, headers) = parse_headers(input)?;
+
+    let (input, body) = parse_body(moved)(input)?;
+
+    Ok((input, Segment { headers, body }))
+  }
+}
+
+fn parse_headers(input: &[u8]) -> IResult<&[u8], Vec<Header>> {
+  let (input, headers) =
+    many0(terminated(parse_header, tag("\r\n\r\n")))(input)?;
+  Ok((input, headers))
+}
+fn parse_header(input: &[u8]) -> IResult<&[u8], Header> {
+  let (input, _) = opt(tag("\r\n"))(input)?;
+  let (input, name) = take_until(":")(input)?;
+  let (input, _) = tag(": ")(input)?;
+  let (input, value) = take_until("\r\n")(input)?;
+  let name = String::from_utf8_lossy(name).into_owned();
+  let value = String::from_utf8_lossy(value).into_owned();
+  Ok((input, Header { name, value }))
+}
+
+fn parse_body(boundary: &str) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<u8>> {
+  let boundary_marker = format!("\r\n--{}", boundary);
+  move |input: &[u8]| {
+    let (remaining, body) = take_until(boundary_marker.as_str())(input)?;
+    Ok((remaining, body.to_vec()))
+  }
+}
+
+// fn main() {
+//   let boundary = "boundary";
+//   let data = b"--boundary\r\nContent-Disposition: form-data; name=\"field1\"\r\n\r\nvalue1\r\n--boundary\r\nContent-Disposition: form-data; name=\"field2\"; filename=\"example.txt\"\r\nContent-Type: text/plain\r\n\r\nvalue2\r\n--boundary--";
+
+//   let result = parse_multipart(data, boundary);
+
+//   match result {
+//     Ok((_, form_data)) => println!("{:#?}", form_data),
+//     Err(e) => eprintln!("Error: {:?}", e),
+//   }
+// }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
 
+  use std::{fs::File, io::Read};
+
+  use super::*;
   fn read_file(path: &str) -> Result<Vec<u8>, std::io::Error> {
     // let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("moc");
     // env::set_current_dir(&test_dir).expect("Failed to set current directory");
@@ -144,20 +111,56 @@ mod tests {
     file.read_to_end(&mut buffer)?;
     Ok(buffer)
   }
+  // Add your test functions here
   #[test]
-  fn parse_multiple_entries() {
-    // Define the multipart/form-data content
-
-    let file_path = "./mocks/c006a72d54394df978b69f41250ae264904000dd4fc39631e10080c96cd7.response";
+  fn test_example() {
+    let file_path = "./mocks/e80da7018c0ad932ca2d0e9ccf4186055af4614c9f4699fe2e371ca8c613.response";
     let file_data = read_file(file_path).unwrap();
 
-    let boundry: String = String::from(
-      "c006a72d54394df978b69f41250ae264904000dd4fc39631e10080c96cd7",
-    );
-    let result = parse(file_data, boundry);
-    // Check if the result is as expected
-    // println!("{:?}", result[0]);
-    assert_eq!(result.len(), 10);
-    // assert_eq!(result[0], );
+    let input = file_data.as_ref();
+    let result = parse_multipart(
+      input,
+      "e80da7018c0ad932ca2d0e9ccf4186055af4614c9f4699fe2e371ca8c613",
+    )
+    .unwrap();
+    println!("{:?}", result.1.segments[0].headers);
+    // assert_eq!(result.1, ("", "", "", "", ""));
+  }
+  #[test]
+  fn test_parse_header() {
+    let data = b"Content-Disposition: form-data; name=\"field1\"\r\nContent-Disposition: form-data; name=\"field2\"\r\n";
+
+    let result = many0(parse_header)(data);
+
+    match result {
+      Ok((rest, header)) => println!("{:#?}", header),
+      Err(e) => eprintln!("Error: {:?}", e),
+    }
+  }
+  #[test]
+  fn test_parse_body() {
+    let data = b"\r\n";
+
+    let result = many0(parse_header)(data);
+
+    match result {
+      Ok((_, header)) => println!("{:#?}", header),
+      Err(e) => eprintln!("Error: {:?}", e),
+    }
+  }
+  #[test]
+  fn main() {
+    let boundary = "boundary";
+    let data = b"--boundary\r\nContent-Disposition: form-data; name=\"field1\"\r\n\r\nvalue1\r\n--boundary\r\nContent-Disposition: form-data; name=\"field2\"; filename=\"example.txt\"\r\nContent-Type: text/plain\r\n\r\nvalue2\r\n--boundary--";
+
+    let result = parse_multipart(data, boundary);
+
+    match result {
+      Ok((_, form_data)) => println!(
+        "{:#?}",
+        String::from_utf8_lossy(&form_data.segments[1].body) // Convert Vec<u8> to &[u8]
+      ),
+      Err(e) => eprintln!("Error: {:?}", e),
+    }
   }
 }
