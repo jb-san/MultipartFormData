@@ -25,7 +25,10 @@ const data = await formData.arrayBuffer();
 import MultipartFormData from "multipart-form-data";
 const data = await response.body.arrayBuffer();
 const contentType = response.headers.get("Content-Type");
-const formData = await MultipartFormData.parse(data, contentType);
+// parse in the main thread
+const formData = MultipartFormData.parse(data, contentType);
+// or parse in a worker
+const formData = await MultipartFormData.parseAsync(data, contentType);
 for (const [name, value, metadata] of formData) {
   console.log(name, value, metadata);
 }
