@@ -1,7 +1,7 @@
 use nom::{
   branch::alt,
   bytes::complete::{tag, take_until},
-  combinator::{map, not, opt},
+  combinator::{map, not, opt, peek},
   multi::{many0, many_till},
   sequence::{delimited, preceded, terminated},
   IResult,
@@ -28,8 +28,7 @@ pub fn parse_multipart<'a>(
   input: &'a [u8],
   boundary: &'a str,
 ) -> IResult<&'a [u8], FormData> {
-  let (input, segments) =
-    many0(preceded(parse_boundary(&boundary), parse_segment(boundary)))(input)?;
+  let (input, segments) = many0(parse_segment(boundary))(input)?;
 
   Ok((input, FormData { segments }))
 }
@@ -40,6 +39,7 @@ fn parse_boundary<'a>(
   let moved = boundary;
 
   move |input| {
+    // let res = tag(boundary_marker.as_str())(input);
     let res = alt((
       delimited(tag("\r\n--"), tag(moved), tag("\r\n")),
       delimited(tag("--"), tag(moved), tag("\r\n")),
@@ -49,21 +49,24 @@ fn parse_boundary<'a>(
 }
 
 fn parse_segment<'a>(
-  boundary: &str,
+  boundary: &'a str,
 ) -> impl FnMut(&'a [u8]) -> IResult<&'a [u8], Segment> + '_ {
   let moved = boundary;
   move |input| {
-    let (input, headers) = parse_headers(input)?;
-
+    let (input, _) = parse_boundary(moved)(input)?;
+    let (input, (headers, _)) =
+      many_till(parse_header, tag(b"\r\n\r\n"))(input)?; // Extract headers from the tuple
+    println!("{:?}", headers);
     let (input, body) = parse_body(moved)(input)?;
 
-    Ok((input, Segment { headers, body }))
+    Ok((input, Segment { headers, body })) // Pass headers and body separately to the Segment struct
   }
 }
 
 fn parse_headers(input: &[u8]) -> IResult<&[u8], Vec<Header>> {
-  let (input, headers) =
-    many0(terminated(parse_header, tag("\r\n\r\n")))(input)?;
+  let endOfHeaders = tag(b"\r\n\r\n");
+  let (input, headers) = many0(terminated(parse_header, endOfHeaders))(input)?;
+  // println!("{:?}", headers);
   Ok((input, headers))
 }
 fn parse_header(input: &[u8]) -> IResult<&[u8], Header> {
@@ -71,8 +74,13 @@ fn parse_header(input: &[u8]) -> IResult<&[u8], Header> {
   let (input, name) = take_until(":")(input)?;
   let (input, _) = tag(": ")(input)?;
   let (input, value) = take_until("\r\n")(input)?;
-  let name = String::from_utf8_lossy(name).into_owned();
+  // let (input, _) = peek(not(tag("\r\n\r\n")))(input)?;
+
+  // let (input, _) = not(tag("\r\n\r\n"))(input)?;
   let value = String::from_utf8_lossy(value).into_owned();
+  let name = String::from_utf8_lossy(name).into_owned();
+  println!("{:?}", name);
+  println!("{:?}", value);
   Ok((input, Header { name, value }))
 }
 
@@ -83,18 +91,6 @@ fn parse_body(boundary: &str) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<u8>> {
     Ok((remaining, body.to_vec()))
   }
 }
-
-// fn main() {
-//   let boundary = "boundary";
-//   let data = b"--boundary\r\nContent-Disposition: form-data; name=\"field1\"\r\n\r\nvalue1\r\n--boundary\r\nContent-Disposition: form-data; name=\"field2\"; filename=\"example.txt\"\r\nContent-Type: text/plain\r\n\r\nvalue2\r\n--boundary--";
-
-//   let result = parse_multipart(data, boundary);
-
-//   match result {
-//     Ok((_, form_data)) => println!("{:#?}", form_data),
-//     Err(e) => eprintln!("Error: {:?}", e),
-//   }
-// }
 
 #[cfg(test)]
 mod tests {
@@ -128,7 +124,7 @@ mod tests {
   }
   #[test]
   fn test_parse_header() {
-    let data = b"Content-Disposition: form-data; name=\"field1\"\r\nContent-Disposition: form-data; name=\"field2\"\r\n";
+    let data = b"Content-Disposition: form-data; name=\"field1\"\r\nContent-Disposition: form-data; name=\"field2\"\r\n\r\ntest2--boundary--\r\n";
 
     let result = many0(parse_header)(data);
 
@@ -149,8 +145,9 @@ mod tests {
     }
   }
   #[test]
-  fn main() {
+  fn simple_test() {
     let boundary = "boundary";
+    // let data = b"--boundary\r\nContent-Disposition: form-data; name=\"field2\"; filename=\"example.txt\"\r\nContent-Type: text/plain\r\n\r\nvalue2\r\n--boundary--";
     let data = b"--boundary\r\nContent-Disposition: form-data; name=\"field1\"\r\n\r\nvalue1\r\n--boundary\r\nContent-Disposition: form-data; name=\"field2\"; filename=\"example.txt\"\r\nContent-Type: text/plain\r\n\r\nvalue2\r\n--boundary--";
 
     let result = parse_multipart(data, boundary);
@@ -158,7 +155,8 @@ mod tests {
     match result {
       Ok((_, form_data)) => println!(
         "{:#?}",
-        String::from_utf8_lossy(&form_data.segments[1].body) // Convert Vec<u8> to &[u8]
+        form_data //
+                  // String::from_utf8_lossy(&form_data.segments[1].body) // Convert Vec<u8> to &[u8]
       ),
       Err(e) => eprintln!("Error: {:?}", e),
     }
