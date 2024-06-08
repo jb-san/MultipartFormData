@@ -191,17 +191,20 @@ export class MultipartFormData {
         value
       )}\r\n`;
       //@ts-expect-error TODO: fix this type error
-      switch (typeof value.content.type) {
-        case "string":
-          headers += `Content-Type: text/plain\r\n\r\n`;
-          break;
-        case undefined:
-          headers += `Content-Type: text/plain\r\n\r\n`;
-          break;
-        default:
+      if (!value.content.type) {
+        const type =
           //@ts-expect-error TODO: fix this type error
-          headers += `Content-Type: ${value.content.type}\r\n\r\n`;
-          break;
+          value.meta.type ||
+          //@ts-expect-error TODO: fix this type error
+          value.meta["Content-Type"] ||
+          //@ts-expect-error TODO: fix this type error
+          value.meta["content-type"] ||
+          //@ts-expect-error TODO: fix this type error
+          value.meta["type"];
+        headers += `Content-Type: ${type}\r\n\r\n`;
+      } else {
+        //@ts-expect-error TODO: fix this type error
+        headers += `Content-Type: ${value.content.type}\r\n\r\n`;
       }
 
       const headersBlob = new Blob([headers]);
