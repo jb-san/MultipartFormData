@@ -16,7 +16,8 @@ formData.append("file", new Blob(["hello world"]), {
   contentType: "text/plain",
   custom: "metadata",
 });
-const data = await formData.arrayBuffer();
+// this is the encoded form data
+const data = await formData.blob();
 ```
 
 ### Parse
