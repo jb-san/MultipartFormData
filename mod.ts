@@ -185,6 +185,7 @@ export class MultipartFormData {
   blob() {
     const multipartBody = [];
     for (const [key, value] of this.entries()) {
+      console.log("value", value);
       let headers = `--${this.boundary}\r\n`;
       headers += `Content-Disposition: form-data; name="${key}" ${this.#getContentDispositionStrings(
         value

@@ -17,12 +17,7 @@ const resp = await MultipartFormData.parseLegacy(
   uintArray,
   "c006a72d54394df978b69f41250ae264904000dd4fc39631e10080c96cd7"
 );
-
-const formData = new MultipartFormData();
-formData.append("testing", new Blob(["asdf"], { type: "application/json" }), {
-  metaName: "test",
-});
-formData.append("testing2", new Blob(["asdf2"]), { metaName: "test" });
-console.log("formData", formData);
-console.log("formData", await formData.blob().text());
 // console.log("resp", resp);
+const text = await resp2.blob().text();
+Deno.writeTextFile("output.txt", text);
+console.log("resp", await resp.blob().text());
